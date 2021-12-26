@@ -1,0 +1,207 @@
+---
+title: "Projek Akhir Data Science"
+author: "Bayu Tri Nugroho"
+date: "12/21/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load Library
+```{r}
+library(vroom)
+library(here)
+#Library untuk mendapatkan sentimen
+library(sentimentr)
+library(syuzhet)
+#Library untuk preprocessing
+library(tidytext)
+library(textclean)
+library(tibble)
+library(tm)
+#Library untuk membuat wordcloud
+library(wordcloud)
+#Library untuk penggunaan corpus dalam cleaning data
+library(RTextTools)
+#Library untuk membuat shiny
+library(shiny)
+```
+
+## Load Dataset
+```{r}
+#Load Dataset
+rawDatas=read.csv("file:///E:/KULIAH TEKNIK INFORMATIKA/SEMESTER 5/Praktikum Data Science/Proyek Akhir/proyekakhirprakds-main/bpjs.csv",header=T)
+#Mengubah Data (Tabel Content) Menjadi Vector
+rawData=rawDatas$content
+rawData.text=Corpus(VectorSource(rawData))
+```
+
+## Cleaning Data
+```{r}
+## Cleaning data
+removeURL <- function(x) gsub("http[^[:space:]]*", "", x)
+clean <- tm_map(rawData.text, removeURL)
+
+removeNL <- function(y) gsub("\n", " ", y)
+clean <- tm_map(clean, removeNL)
+
+removepipe <- function(z) gsub("<[^>]+>", "", z)
+clean <- tm_map(clean, removepipe)
+
+remove.mention <- function(z) gsub("@\\S+", "", z)
+clean <- tm_map(clean, remove.mention)
+
+remove.hashtag <- function(z) gsub("#\\S+", "", z)
+clean <- tm_map(clean, remove.hashtag)
+
+removeamp <- function(y) gsub("&amp;", "", y)
+clean <- tm_map(clean, removeamp)
+
+removetitik3 <- function(y) gsub("[[:punct:]]", "", y)
+clean <- tm_map(clean, removetitik3)
+
+remove.all <- function(xy) gsub("[^[:alpha:][:space:]]*", "", xy)
+clean <- tm_map(clean,remove.all)
+
+clean <- tm_map(clean, tolower)
+
+##load stopword-ID
+stopwordID <- "E:/KULIAH TEKNIK INFORMATIKA/SEMESTER 5/Praktikum Data Science/Proyek Akhir/proyekakhirprakds-main/ID-Stopwords.txt"
+
+##membaca stopwordID perbaris
+cStopwordID<-readLines(stopwordID);
+
+##Hapus kata stopword
+clean <- tm_map(clean, removeWords, cStopwordID)
+writeLines(strwrap(clean[[2]]$content, 100))
+
+#remove extra whitespace (spasi)
+clean <- tm_map(clean, stripWhitespace)
+
+##Save dataset yang sudah bersih
+dataframe=data.frame(text=unlist(sapply(clean, `[`)), stringsAsFactors=F)
+write.csv(dataframe,file = 'E:/KULIAH TEKNIK INFORMATIKA/SEMESTER 5/Praktikum Data Science/Proyek Akhir/proyekakhirprakds-main/DataBersih.csv')
+
+```
+
+## Menentukan Sentimen
+```{r}
+
+#Membaca file csv yang sudah di cleaning data 
+datanya<-read.csv("E:/KULIAH TEKNIK INFORMATIKA/SEMESTER 5/Praktikum Data Science/Proyek Akhir/proyekakhirprakds-main/DataBersih.csv",stringsAsFactors = FALSE)
+
+#Memanggil NRC sentiment dictionary untuk mengkalkulasi berbagai emosi 
+s<-get_nrc_sentiment(as.character(datanya$text))
+
+##tampilkan sentiment sebagai barplot
+tweets_combine<-cbind(datanya$text,s)
+par(mar=rep(3,4))
+barplot(colSums(s),col=rainbow(10),ylab='count',main='Sentiment Analisis')
+```
+
+## Membuat Frequent Word
+```{r}
+##ubah data menjadi corpus
+corpus<-Corpus(VectorSource(datanya$text))
+##ubah dari corpus menjadi DTM
+DTM <- TermDocumentMatrix(corpus)
+##ubah data DTM ke matrix
+mat <- as.matrix(DTM)
+##jumlahkan setiap kata dan urutkan
+f <- sort(rowSums(mat),decreasing=TRUE)
+##ubah data agar menjadi dataframe
+dat <- data.frame(stringsAsFactors=FALSE,word = names(f),freq=f)
+
+##tampilkan data dalam bentuk barplot
+barplot(dat[1:10,]$freq, las = 2, names.arg = dat[1:10,]$word,
+        col ="lightblue", main ="Most frequent words",
+        ylab = "Word frequencies")
+
+```
+
+## Membuat Wordcloud
+```{r}
+##buat wordcloud dari data corpus yang sudah dibuat diatas
+wordcloud(corpus,min.freq = 4,max.words=100,random.order=F,colors=brewer.pal(8,"Dark2"))
+```
+
+
+## Membuat Interface Shiny
+```{r}
+#Script UI
+ui <- fluidPage(
+  
+  # Application title
+  titlePanel("Analisis Sentimen Terhadap Review Aplikasi BPJS Mobile"),
+  mainPanel(
+    tabsetPanel(type = "tabs",
+                tabPanel("Data Asli", DT::dataTableOutput('tbl')),
+                tabPanel("Data Bersih", DT::dataTableOutput('tbl2')),
+                tabPanel("Scatterplot", plotOutput("asPlot")),
+                tabPanel("Frequent Word", plotOutput("freqWord")),
+                tabPanel("Wordcloud", plotOutput("wordcl"))
+    )
+  )
+)
+
+#Script server
+#Membuat fungsi `input`, `output`, dan `session`
+#Di dalam badan fungsi tersebut berisi seluruh kode pemrosesan data
+#Membuat `input` dan menampilkan hasil pada `output`
+
+server <- function(input, output, session) {
+  as_data <- reactive({
+    
+    input$Update
+    isolate({
+      withProgress({
+        setProgress(message = "Processing analisis...")
+        as_file <- input$as
+        if(!is.null(as_file)){
+          as_text <- readLines(as_file$datapath)
+        }
+        else
+        {
+          as_text <- "A Barplot is an immage made of words that..."
+        }
+        
+      })
+    })
+  })
+  
+  barplot_rep <- repeatable(barplot)
+  
+  #Menampilkan data asli
+  output$tbl = DT::renderDataTable({
+    DT::datatable(rawDatas, options = list(lengthchange = FALSE))
+  })
+  #Menampilkan data bersih
+  output$tbl2 = DT::renderDataTable({
+    DT::datatable(datanya, options = list(lengthchange = FALSE))
+  })
+  #Menampilkan grafik sentimen
+  output$freqWord <- renderPlot({ withProgress({
+    setProgress(message = "Creating barplot...")
+    barplot(dat[1:10,]$freq, las = 2, names.arg = dat[1:10,]$word,
+        col ="lightblue", main ="Most frequent words",
+        ylab = "Word frequencies")
+  })
+  })
+  #Menampilkan grafik sentimen
+  output$asPlot <- renderPlot({ withProgress({
+    setProgress(message = "Creating barplot...")
+    barplot(colSums(s),col = rainbow(10),ylab = 'count',main = 'Sentiment Analysis')
+  })
+  })
+  #Menampilkan wordcloud
+  output$wordcl <- renderPlot({
+    wordcloud(corpus,min.freq = 4,max.words=100,random.order=F,colors=brewer.pal(8,"Dark2"))
+  })
+  
+}
+
+#Menjalankan shiny
+shinyApp(ui = ui, server = server, options = list(height = "600px"))
+```
